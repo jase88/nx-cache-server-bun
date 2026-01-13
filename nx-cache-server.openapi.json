@@ -1,0 +1,320 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Nx custom remote cache specification.",
+    "description": "Nx is an AI-first build platform that connects everything from your editor to CI. Helping you deliver fast, without breaking things.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/cache/{hash}": {
+      "put": {
+        "description": "Upload a task output",
+        "operationId": "put",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully uploaded the output"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid authentication token.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "Error message provided to the Nx CLI user"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access forbidden. (e.g. read-only token used to write)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "Error message provided to the Nx CLI user"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cannot override an existing record"
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "description": "The file size in bytes",
+            "required": true,
+            "schema": {
+              "type": "number"
+            },
+            "name": "Content-Length"
+          },
+          {
+            "name": "hash",
+            "description": "The task hash corresponding to the uploaded task output",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "description": "Download a task output (cache artifact) for the given task hash.",
+        "operationId": "get",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved cache artifact",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "An octet stream with the content."
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
+          "404": {
+            "description": "The record was not found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/admin/tokens": {
+      "get": {
+        "description": "List all configured API tokens. Requires the ADMIN_TOKEN bearer token.",
+        "operationId": "adminListTokens",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A list of tokens. Note: token values are masked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTokensResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          }
+        }
+      },
+      "post": {
+        "description": "Create a new API token. Requires the ADMIN_TOKEN bearer token.",
+        "operationId": "adminAddToken",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created token record. This response includes the full, unmasked token value; store it securely.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          }
+        }
+      }
+    },
+    "/v1/admin/tokens/{token}": {
+      "delete": {
+        "description": "Delete a token by its exact value. Requires the ADMIN_TOKEN bearer token.",
+        "operationId": "adminDeleteToken",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "The token value to delete (must match exactly).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Token deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
+          "404": {
+            "description": "Token not found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerToken": {
+        "type": "http",
+        "description": "Send an Authorization header with a Bearer token. For cache endpoints, use a token stored in the server database (permission 'readonly' or 'full'). For admin endpoints, use the ADMIN_TOKEN configured via environment variable.",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "TokenPermission": {
+        "type": "string",
+        "enum": ["readonly", "full"],
+        "description": "Token permission. 'readonly' can download cache entries; 'full' can download and upload cache entries."
+      },
+      "TokenRecord": {
+        "type": "object",
+        "required": ["id", "value", "permission"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A human-friendly identifier for the token (e.g. a CI system name)."
+          },
+          "value": {
+            "type": "string",
+            "description": "The token value. Returned unmasked only when creating a token; listing tokens returns masked values."
+          },
+          "permission": {
+            "$ref": "#/components/schemas/TokenPermission"
+          }
+        }
+      },
+      "AddTokenRequest": {
+        "type": "object",
+        "required": ["id", "permission"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/TokenPermission"
+          }
+        }
+      },
+      "ListTokensResponse": {
+        "type": "object",
+        "required": ["tokens"],
+        "properties": {
+          "tokens": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenRecord"
+            }
+          }
+        }
+      },
+      "PlainTextError": {
+        "type": "string",
+        "description": "Plain-text error message."
+      }
+    },
+    "responses": {
+      "AccessForbidden": {
+        "description": "Access forbidden",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "$ref": "#/components/schemas/PlainTextError"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Bad request",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "$ref": "#/components/schemas/PlainTextError"
+            }
+          }
+        }
+      }
+    }
+  }
+}
