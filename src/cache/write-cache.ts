@@ -15,7 +15,9 @@ const validateContentLengthHeader = (headerContentLength: string) => {
   return contentLength;
 };
 
-const toReadableStream = (body: ReadableStream<Uint8Array> | Blob | null): ReadableStream<Uint8Array<ArrayBufferLike>> => {
+const toReadableStream = (
+  body: ReadableStream<Uint8Array> | Blob | null,
+): ReadableStream<Uint8Array<ArrayBufferLike>> => {
   if (body instanceof ReadableStream) return body;
   if (body instanceof Blob) return body.stream();
   return null;
@@ -86,7 +88,10 @@ export async function writeCache(
     await cacheFile.writeStream(countedStream);
     return okResponse({ message: null });
   } catch (error) {
-    if (error instanceof ContentLengthExceededError || error instanceof ContentLengthMismatchError) {
+    if (
+      error instanceof ContentLengthExceededError ||
+      error instanceof ContentLengthMismatchError
+    ) {
       return badRequest('Invalid Content-Length header');
     }
     logger.error(error);
