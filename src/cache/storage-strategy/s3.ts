@@ -21,7 +21,21 @@ export class S3Strategy implements CacheStorageStrategy {
     return this.#client.size(hash);
   }
 
-  async write(hash: string, data: Uint8Array): Promise<void> {
-    await this.#client.write(hash, data);
+  async writeStream(hash: string, stream: ReadableStream<Uint8Array>): Promise<void> {
+    const file = this.#client.file(hash);
+    const writer = file.writer({ retry: 3, queueSize: 10, partSize: 5 * 1024 * 1024 });
+
+    try {
+      for await (const chunk of stream) {
+        writer.write(chunk);
+        await writer.flush();
+      }
+      await writer.end();
+    } catch (error) {
+      try {
+        await writer.end();
+      } catch {}
+      throw error;
+    }
   }
 }

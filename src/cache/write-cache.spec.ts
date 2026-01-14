@@ -9,50 +9,75 @@ describe('writeCache', () => {
   const makeCacheFile = () => ({
     valid: mock<CacheFile['valid']>().mockReturnValue(true),
     exists: mock<CacheFile['exists']>(),
-    write: mock<CacheFile['write']>(),
+    writeStream: mock<CacheFile['writeStream']>(),
   });
 
-  const createMockedBuffer = (value: string) =>
-    mock().mockResolvedValue(new TextEncoder().encode(value).buffer);
+  const createStream = (value: string) =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(value));
+        controller.close();
+      },
+    });
+
+  const consumeStream = async (stream: ReadableStream<Uint8Array>) => {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    return chunks;
+  };
 
   it('returns 403 when token lacks write permission', async () => {
     const cacheFile = makeCacheFile();
-    const mockedBuffer = createMockedBuffer('data');
-    const response = await writeCache(cacheFile, 'readonly', mockedBuffer, '4');
+    const body = createStream('data');
+    const response = await writeCache(cacheFile, 'readonly', body, '4');
 
     expect(response.status).toBe(403);
     expect(await response.text()).toBe('Access forbidden');
     expect(cacheFile.valid).not.toHaveBeenCalled();
     expect(cacheFile.exists).not.toHaveBeenCalled();
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(cacheFile.writeStream).not.toHaveBeenCalled();
   });
 
   it('returns 400 when hash is invalid and does not read body or touch storage', async () => {
     const cacheFile = makeCacheFile();
     cacheFile.valid.mockReturnValue(false);
-    const mockedBuffer = createMockedBuffer('data');
+    const body = createStream('data');
 
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, '4');
+    const response = await writeCache(cacheFile, 'full', body, '4');
 
     expect(response.status).toBe(400);
     expect(await response.text()).toBe('Invalid hash');
     expect(cacheFile.valid).toHaveBeenCalled();
-    expect(mockedBuffer).not.toHaveBeenCalled();
     expect(cacheFile.exists).not.toHaveBeenCalled();
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(cacheFile.writeStream).not.toHaveBeenCalled();
   });
 
   it('returns 500 when reading request body fails', async () => {
     const bodyError = new Error('body read failed');
     const cacheFile = makeCacheFile();
+    cacheFile.exists.mockResolvedValue(false);
 
-    const mockedBuffer = mock().mockRejectedValue(bodyError);
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, '4');
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        throw bodyError;
+      },
+    });
+
+    cacheFile.writeStream.mockImplementation(async (stream) => {
+      await consumeStream(stream);
+    });
+
+    const response = await writeCache(cacheFile, 'full', body, '4');
 
     expect(response.status).toBe(500);
-    expect(await response.text()).toBe('Failed to read request body');
-    expect(cacheFile.exists).not.toHaveBeenCalled();
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(await response.text()).toBe('Failed to write to cache');
+    expect(cacheFile.exists).toHaveBeenCalled();
+    expect(cacheFile.writeStream).toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(bodyError);
   });
 
@@ -61,12 +86,12 @@ describe('writeCache', () => {
     const cacheFile = makeCacheFile();
     cacheFile.exists.mockRejectedValue(existsError);
 
-    const mockedBuffer = createMockedBuffer('data');
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, '4');
+    const body = createStream('data');
+    const response = await writeCache(cacheFile, 'full', body, '4');
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe('Failed to check cache');
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(cacheFile.writeStream).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(existsError);
   });
 
@@ -74,50 +99,56 @@ describe('writeCache', () => {
     const cacheFile = makeCacheFile();
     cacheFile.exists.mockResolvedValue(true);
 
-    const mockedBuffer = createMockedBuffer('data');
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, '4');
+    const body = createStream('data');
+    const response = await writeCache(cacheFile, 'full', body, '4');
 
     expect(response.status).toBe(409);
     expect(await response.text()).toBe('Cannot override an existing record');
     expect(cacheFile.exists).toHaveBeenCalled();
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(cacheFile.writeStream).not.toHaveBeenCalled();
   });
 
   it('returns 400 when content length header is invalid', async () => {
     const cacheFile = makeCacheFile();
     cacheFile.exists.mockResolvedValue(false);
 
-    const mockedBuffer = createMockedBuffer('data');
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, 'not-a-number');
+    const body = createStream('data');
+    const response = await writeCache(cacheFile, 'full', body, 'not-a-number');
 
     expect(response.status).toBe(400);
     expect(await response.text()).toBe('Invalid Content-Length header');
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(cacheFile.writeStream).not.toHaveBeenCalled();
   });
 
   it('returns 400 when content length does not match body length', async () => {
     const cacheFile = makeCacheFile();
     cacheFile.exists.mockResolvedValue(false);
 
-    const mockedBuffer = createMockedBuffer('data');
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, '3');
+    const body = createStream('data');
+    cacheFile.writeStream.mockImplementation(async (stream) => {
+      await consumeStream(stream);
+    });
+
+    const response = await writeCache(cacheFile, 'full', body, '3');
 
     expect(response.status).toBe(400);
     expect(await response.text()).toBe('Invalid Content-Length header');
-    expect(cacheFile.write).not.toHaveBeenCalled();
+    expect(cacheFile.writeStream).toHaveBeenCalled();
   });
 
   it('writes and returns 200 with null body when all validations pass', async () => {
     const cacheFile = makeCacheFile();
     cacheFile.exists.mockResolvedValue(false);
-    cacheFile.write.mockResolvedValue(undefined);
+    cacheFile.writeStream.mockImplementation(async (stream) => {
+      const chunks = await consumeStream(stream);
+      expect(Buffer.concat(chunks.map((c) => Buffer.from(c))).toString()).toBe('some-data');
+    });
 
-    const body = 'some-data';
-    const mockedBuffer = createMockedBuffer(body);
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, `${body.length}`);
+    const body = createStream('some-data');
+    const response = await writeCache(cacheFile, 'full', body, '9');
 
     expect(cacheFile.exists).toHaveBeenCalled();
-    expect(cacheFile.write).toHaveBeenCalledWith(new TextEncoder().encode(body));
+    expect(cacheFile.writeStream).toHaveBeenCalled();
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('');
   });
@@ -126,14 +157,13 @@ describe('writeCache', () => {
     const diskFullError = new Error('disk full');
     const cacheFile = makeCacheFile();
     cacheFile.exists.mockResolvedValue(false);
-    cacheFile.write.mockRejectedValue(diskFullError);
+    cacheFile.writeStream.mockRejectedValue(diskFullError);
 
-    const body = 'payload';
-    const mockedBuffer = createMockedBuffer(body);
-    const response = await writeCache(cacheFile, 'full', mockedBuffer, `${body.length}`);
+    const body = createStream('payload');
+    const response = await writeCache(cacheFile, 'full', body, '7');
 
     expect(cacheFile.exists).toHaveBeenCalled();
-    expect(cacheFile.write).toHaveBeenCalledWith(new TextEncoder().encode(body));
+    expect(cacheFile.writeStream).toHaveBeenCalled();
     expect(response.status).toBe(500);
     expect(await response.text()).toBe('Failed to write to cache');
     expect(logger.error).toHaveBeenCalledWith(diskFullError);

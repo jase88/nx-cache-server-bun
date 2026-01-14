@@ -3,4 +3,5 @@ export interface CacheStorageStrategy {
   // assumes existence check has been done beforehand
   getStream(hash: string): Promise<ReadableStream>;
   getSize(hash: string): Promise<number>;
+  writeStream(hash: string, stream: ReadableStream<Uint8Array>): Promise<void>;
 }

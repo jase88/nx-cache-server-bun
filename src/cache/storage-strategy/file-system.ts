@@ -34,19 +34,17 @@ export class FileSystemStrategy implements CacheStorageStrategy {
     const finalPath = this.getPath(hash);
     const tempPath = this.getTempPath(hash);
 
-    const sink = Bun.file(tempPath).writer();
+    const writer = Bun.file(tempPath).writer();
     try {
       for await (const chunk of stream) {
-        sink.write(chunk);
+        writer.write(chunk);
       }
-      await sink.end();
-
+      await writer.end();
       await rename(tempPath, finalPath);
     } catch (error) {
       try {
-        await sink.end();
+        await writer.end();
       } catch {}
-
       try {
         await rm(tempPath, { force: true });
       } catch {}

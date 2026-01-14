@@ -69,7 +69,7 @@ const server = Bun.serve({
         const tokenPermission = getTokenPermission(headers);
         const cacheFile = getCacheFile(params.hash);
 
-        return writeCache(cacheFile, tokenPermission, body, headers.get('Content-Length'));
+        return writeCache(cacheFile, tokenPermission, body, headers.get('Content-Length') ?? '');
       },
     },
     '/v1/admin/tokens/:token': {
