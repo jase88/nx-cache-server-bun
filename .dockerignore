@@ -1,0 +1,10 @@
+node_modules
+cache
+data
+e2e
+**/*.spec.ts
+*.log
+*.sqlite*
+.git
+.idea
+bun.lockb
